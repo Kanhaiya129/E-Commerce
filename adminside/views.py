@@ -5,12 +5,13 @@ from rest_framework.generics import ListAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.authtoken.models import Token
 
-from adminside.serializer import CategoriesSerializer,ItemsSerializer
-from adminside.models import Categories, Items
+from adminside.serializer import CategoriesSerializer, ItemsSerializer
+from adminside.models import Categories, Items, ItemImage
 from services.pagination import CustomPagination
 
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
+from django.db import transaction
 
 
 class LoginView(APIView):
@@ -180,20 +181,35 @@ class ItemsView(ListAPIView):
 
     def post(self, request):
         data = request.data
-        serializer = self.serializer_class(data=data)
-        if serializer.is_valid():
-            serializer.save()
+        images_data = data.getlist("images")
+        item_data = {
+            "name": data["name"],
+            "description": data["description"],
+            "category_id": data["category_id"],
+        }
+        category_obj = Categories.objects.get(id=item_data.get("category_id"))
+        try:
+            with transaction.atomic():
+                item_obj = Items.objects.create(
+                    name=item_data["name"],
+                    description=item_data["description"],
+                    in_stock=True,
+                    category=category_obj,
+                )
+                for image in images_data:
+                    ItemImage.objects.create(item=item_obj, image=image)
             data = {
                 "status": True,
                 "message": "Item Added Successfully",
                 "data": None,
             }
             return Response(data=data, status=status.HTTP_201_CREATED)
-        data = {
-            "status": False,
-            "message": serializer.errors,
-            "data": None,
-        }
+        except Exception as e:
+            data = {
+                "status": False,
+                "message": e,
+                "data": None,
+            }
         return Response(data=data, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -211,27 +227,21 @@ class ItemDetailAPIView(APIView):
         if item:
             serializer = ItemsSerializer(item)
             return Response(serializer.data)
-        return Response(
-            {"message": "Item not found"}, status=status.HTTP_404_NOT_FOUND
-        )
+        return Response({"message": "Item not found"}, status=status.HTTP_404_NOT_FOUND)
 
-    def put(self, request, pk, *args, **kwargs):
-        item = self.get_object(pk)
-        if item:
-            serializer = ItemsSerializer(item, data=request.data)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(serializer.data)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        return Response(
-            {"message": "Item not found"}, status=status.HTTP_404_NOT_FOUND
-        )
+    # def put(self, request, pk, *args, **kwargs):
+    #     item = self.get_object(pk)
+    #     if item:
+    #         serializer = ItemsSerializer(item, data=request.data)
+    #         if serializer.is_valid():
+    #             serializer.save()
+    #             return Response(serializer.data)
+    #         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    #     return Response({"message": "Item not found"}, status=status.HTTP_404_NOT_FOUND)
 
     def delete(self, request, pk, *args, **kwargs):
         item = self.get_object(pk)
         if item:
             item.delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
-        return Response(
-            {"message": "Item not found"}, status=status.HTTP_404_NOT_FOUND
-        )
+        return Response({"message": "Item not found"}, status=status.HTTP_404_NOT_FOUND)
